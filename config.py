@@ -12,7 +12,7 @@ class Config:
     OP_CLI = shutil.which("op")
     
     # 1Password Settings
-    OP_ITEM_NAME = "Backblaze Application Key Cyberduck"
+    OP_ITEM_NAME = "B2 Application Key Fal"
     
     # B2 Settings  
     BUCKET_NAME = "fal-bucket"

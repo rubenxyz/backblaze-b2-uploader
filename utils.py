@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -19,7 +20,7 @@ def create_timestamped_output_dir() -> Path:
 
 
 def parse_b2_sync_output(output: str) -> List[Dict[str, str]]:
-    """Parse B2 sync command output to extract file information."""
+    """Parse B2 sync command output to extract file information and URLs."""
     files = []
     lines = output.strip().split('\n')
     
@@ -189,34 +190,101 @@ def generate_json_log(
     return log_file
 
 
+def get_actual_download_urls(bucket_name: str) -> List[str]:
+    """Get actual download URLs from B2 for all files in the bucket."""
+    urls = []
+    try:
+        from b2_uploader import run_b2_command
+        
+        # Get list of files in bucket
+        list_command = [Config.B2_CLI, "ls", f"b2://{bucket_name}"]
+        return_code, stdout, stderr = run_b2_command(list_command)
+        
+        if return_code != 0:
+            logger.error(f"Failed to list bucket contents: {stderr}")
+            return urls
+        
+        # For each file, construct the download URL
+        # The URL format is: https://{endpoint}.backblazeb2.com/file/{bucket_name}/{filename}
+        # We need to determine the correct endpoint (f001, f003, etc.)
+        
+        # Let's try to get the endpoint by uploading a test file
+        import tempfile
+        import os
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.tmp') as temp_file:
+            temp_file.write("test")
+            temp_file_path = temp_file.name
+        
+        try:
+            # Upload a test file to get the actual endpoint
+            test_filename = f"test_endpoint_{int(time.time())}.txt"
+            upload_command = [Config.B2_CLI, "file", "upload", bucket_name, temp_file_path, test_filename]
+            upload_return_code, upload_stdout, upload_stderr = run_b2_command(upload_command)
+            
+            endpoint = "f001"  # Default fallback
+            if upload_return_code == 0:
+                # Extract the endpoint from the upload output
+                for output_line in upload_stdout.split('\n'):
+                    if output_line.startswith('URL by file name:'):
+                        url = output_line.replace('URL by file name:', '').strip()
+                        # Extract endpoint from URL: https://f003.backblazeb2.com/file/...
+                        import re
+                        endpoint_match = re.search(r'https://([^.]+)\.backblazeb2\.com', url)
+                        if endpoint_match:
+                            endpoint = endpoint_match.group(1)
+                        break
+            
+            # Clean up the test file
+            os.unlink(temp_file_path)
+            
+            # Delete the test file from B2
+            delete_command = [Config.B2_CLI, "rm", f"b2://{bucket_name}/{test_filename}"]
+            run_b2_command(delete_command)
+            
+            # Now construct URLs for all files using the correct endpoint
+            for line in stdout.strip().split('\n'):
+                if line.strip():
+                    filename = line.strip()
+                    download_url = f"https://{endpoint}.backblazeb2.com/file/{bucket_name}/{filename}"
+                    urls.append(download_url)
+                    
+        except Exception as e:
+            logger.warning(f"Failed to determine endpoint: {e}")
+            # Fallback to default endpoint
+            for line in stdout.strip().split('\n'):
+                if line.strip():
+                    filename = line.strip()
+                    download_url = f"https://f001.backblazeb2.com/file/{bucket_name}/{filename}"
+                    urls.append(download_url)
+                    
+    except Exception as e:
+        logger.error(f"Error getting download URLs: {e}")
+    
+    return urls
+
 def generate_link_file(output_dir: Path, files_processed: List[Dict[str, str]], bucket_name: str) -> Path:
-    """Generate human-readable link file."""
+    """Generate link file with actual download URLs from B2."""
     timestamp = datetime.now()
     
     link_file = output_dir / f"{timestamp.strftime('%Y%m%d_%H%M%S')}_bucket-links.txt"
     
-    with open(link_file, 'w') as f:
-        f.write(f"# Backblaze B2 Sync Links - {timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"# Bucket: {bucket_name}\n")
-        f.write(f"# Total Files: {len(files_processed)}\n")
-        
-        # Count actions
-        actions = {}
-        for file_info in files_processed:
-            action = file_info.get('action', 'unknown')
-            actions[action] = actions.get(action, 0) + 1
-        
-        action_summary = ", ".join([f"{k}={v}" for k, v in actions.items()])
-        f.write(f"# Sync Action: {action_summary}\n\n")
-        
-        # Write file links
-        for file_info in files_processed:
-            b2_key = file_info.get('b2_key', '')
-            if b2_key:
-                f.write(f"{b2_key}\n")
-                # Generate public URL (this is a simplified version)
-                public_url = f"https://f001.backblazeb2.com/file/{bucket_name}/{b2_key}"
-                f.write(f"{public_url}\n\n")
+    # Get actual download URLs from B2
+    urls = get_actual_download_urls(bucket_name)
+    
+    if urls:
+        with open(link_file, 'w') as f:
+            for url in urls:
+                f.write(f"{url}\n")
+    else:
+        logger.warning("No URLs found, using fallback method")
+        # Fallback to files_processed if available
+        with open(link_file, 'w') as f:
+            for file_info in files_processed:
+                b2_key = file_info.get('b2_key', '')
+                if b2_key:
+                    public_url = f"https://f001.backblazeb2.com/file/{bucket_name}/{b2_key}"
+                    f.write(f"{public_url}\n")
     
     logger.info(f"Generated link file: {link_file}")
     return link_file

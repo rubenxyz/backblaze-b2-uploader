@@ -63,6 +63,9 @@ def sync_operation(verbose: bool = False, dry_run: bool = False) -> int:
         input_path = Config.get_input_path()
         sync_command = [
             Config.B2_CLI, "sync",
+            "--replace-newer",  # Allow older local files to replace newer destination files
+            "--delete",  # Delete files from destination that are not in source (true mirroring)
+            "--exclude-regex", ".*\\.DS_Store",  # Exclude macOS system files
             str(input_path),
             f"b2://{bucket_name}/"
         ]
