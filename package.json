@@ -1,0 +1,17 @@
+{
+  "name": "taskmaster-project",
+  "version": "1.0.0",
+  "description": "Project with Task Master MCP integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "echo 'Task Master is configured via MCP - use Cursor to interact with it'",
+    "install-mcp": "npm install @taskmaster-ai/mcp-server"
+  },
+  "dependencies": {
+    "@taskmaster-ai/mcp-server": "latest"
+  },
+  "devDependencies": {},
+  "keywords": ["taskmaster", "mcp", "ai"],
+  "author": "",
+  "license": "MIT"
+} 

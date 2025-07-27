@@ -1,0 +1,64 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implement Main Python Entry Point (b2_uploader.py) with CLI and 1Password Integration",
+        "description": "Develop the main script (b2_uploader.py) to handle command-line arguments for sync and clean operations, integrate with 1Password CLI for authentication, and orchestrate the B2 sync process.",
+        "details": "Create a Python script named b2_uploader.py as the primary entry point for the application. Use the argparse module to define and parse command-line arguments, supporting at least two subcommands: 'sync' (to synchronize files with B2) and 'clean' (to remove obsolete files or perform cleanup). Each subcommand should have its own set of options and help descriptions for usability[1][2][4][5].\n\nIntegrate with the 1Password CLI (op) to securely retrieve B2 credentials at runtime. This may involve invoking the op command using subprocess and parsing its output. Ensure that authentication errors are handled gracefully, and sensitive information is not logged or exposed.\n\nThe script should orchestrate the B2 sync process by invoking the appropriate internal modules or functions for each operation. Structure the code to allow for easy extension of additional commands in the future. Include comprehensive error handling and user-friendly help messages. Example code for argument parsing:\n\n```python\nimport argparse\n\ndef main():\n    parser = argparse.ArgumentParser(description='B2 Uploader CLI')\n    subparsers = parser.add_subparsers(dest='command', required=True)\n\n    sync_parser = subparsers.add_parser('sync', help='Synchronize files with B2')\n    sync_parser.add_argument('--source', required=True, help='Source directory')\n    sync_parser.add_argument('--dest', required=True, help='B2 destination bucket')\n\n    clean_parser = subparsers.add_parser('clean', help='Clean obsolete files')\n    clean_parser.add_argument('--dry-run', action='store_true', help='Show what would be deleted')\n\n    args = parser.parse_args()\n    # Integrate with 1Password CLI and orchestrate operations here\n\nif __name__ == '__main__':\n    main()\n```\n\nDocument usage examples and ensure the script is executable as a standalone program.",
+        "testStrategy": "1. Run 'python b2_uploader.py --help' and verify that help text is clear, accurate, and lists both 'sync' and 'clean' commands with their options.\n2. Execute 'python b2_uploader.py sync --source test_dir --dest test_bucket' and confirm that argument parsing works and the sync process is initiated.\n3. Execute 'python b2_uploader.py clean --dry-run' and verify correct argument handling and dry-run logic.\n4. Simulate 1Password CLI integration by mocking or using test credentials, ensuring credentials are retrieved securely and errors are handled gracefully.\n5. Test error handling for missing or invalid arguments, and for 1Password authentication failures.\n6. Review code for security best practices, especially regarding credential handling and logging.",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Develop Configuration Management Module (config.py) with Hardcoded and Environment-Based Settings",
+        "description": "Create a config.py module to centralize application settings, including hardcoded values for bucket name, supported image formats, directory paths, and environment-based configuration for sync threads and retry attempts.",
+        "details": "Implement a Python module named config.py that defines all non-secret, rarely changed settings as module-level constants. Include:\n\n- **BUCKET_NAME**: Hardcoded string for the B2 bucket name.\n- **SUPPORTED_IMAGE_FORMATS**: Tuple or list of allowed image file extensions (e.g., ('.jpg', '.png')).\n- **DIRECTORY_PATHS**: Dictionary or constants for relevant local and remote directory paths.\n- **SYNC_THREADS** and **RETRY_ATTEMPTS**: Read from environment variables (using os.environ.get), with sensible defaults for each environment (e.g., development, staging, production). Document expected environment variable names and fallback values.\n\nFollow best practices by:\n- Placing all constants in a single module for easy maintenance and import across the codebase[3][5].\n- Avoiding hardcoding secrets or values likely to change frequently[3].\n- Using clear, uppercase names for constants.\n- Providing docstrings and inline comments for each setting.\n- Optionally, implement a helper function (e.g., get_config()) to return a dictionary of all settings if dynamic access is needed.\n\nExample snippet:\n```python\nimport os\n\nBUCKET_NAME = 'my-b2-bucket'\nSUPPORTED_IMAGE_FORMATS = ('.jpg', '.jpeg', '.png')\nLOCAL_SYNC_DIR = '/data/images'\nREMOTE_SYNC_DIR = 'b2/images'\nSYNC_THREADS = int(os.environ.get('SYNC_THREADS', 4))\nRETRY_ATTEMPTS = int(os.environ.get('RETRY_ATTEMPTS', 3))\n```\n\nEnsure that config.py does not contain any secrets or credentials, and document how to override environment-based settings.",
+        "testStrategy": "1. Import config.py in a test script and verify that all constants are accessible and have the expected default values.\n2. Set environment variables (e.g., SYNC_THREADS, RETRY_ATTEMPTS) before running the test script and confirm that config.py picks up the overridden values.\n3. Attempt to import config.py from b2_uploader.py and ensure no circular dependencies or import errors occur.\n4. Review code to confirm that no secrets or sensitive information are present in config.py.\n5. Check that all constants are documented with clear comments or docstrings.",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement Sync Mode: Execute 'b2 sync', Parse Output, and Generate JSON Logs",
+        "description": "Develop the sync mode functionality to execute the 'b2 sync 01.input/ b2://fal-bucket/' command, parse its output to extract file and URL information, and generate comprehensive JSON logs with sync metadata.",
+        "details": "Implement a Python function or class that, when invoked in sync mode, executes the 'b2 sync 01.input/ b2://fal-bucket/' command using subprocess, capturing both stdout and stderr. Parse the command output to extract details for each file operation (e.g., files uploaded, skipped, or deleted), including file paths, operation type, timestamps, and resulting B2 URLs. For each file, construct a JSON object containing all relevant metadata (such as source path, destination URL, operation performed, file size, and sync timestamp). Aggregate these objects into a comprehensive JSON log file, including overall sync metadata (start/end time, summary statistics, errors if any). Ensure robust error handling for subprocess failures and malformed output. Consider supporting both dry-run and actual sync modes, and ensure compatibility with configuration values (e.g., bucket name, directory paths) from config.py. Use clear logging and structure for maintainability.",
+        "testStrategy": "1. Run the sync mode and verify that the 'b2 sync' command is executed with correct arguments and environment variables. 2. Provide a controlled set of input files and confirm that the output JSON log accurately reflects all file operations, including correct URLs and metadata. 3. Simulate error conditions (e.g., failed uploads, permission errors) and verify that errors are captured and logged in the JSON output. 4. Check that the log includes summary statistics and overall sync metadata. 5. Validate that configuration values from config.py are respected. 6. Review log structure for completeness and clarity.",
+        "status": "done",
+        "dependencies": [
+          1,
+          2
+        ],
+        "priority": "high",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Develop Authentication Module (b2_auth.py) Integrating 1Password CLI for B2 Credential Retrieval and Authorization",
+        "description": "Create a Python module that securely retrieves Backblaze B2 credentials from 1Password using the CLI and handles B2 CLI authorization, exposing functions for use by other components.",
+        "details": "Implement a Python module named b2_auth.py that encapsulates all authentication logic for the application. Use the 1Password CLI (op) or a suitable Python wrapper (such as the '1password' or 'onepw' package) to securely fetch B2 credentials (e.g., application key ID and application key) at runtime. Ensure the module can:\n\n- Retrieve secrets from 1Password by referencing secret paths or item fields, with all secret references configurable via environment variables or constants.\n- Handle errors gracefully, including missing credentials, CLI failures, or invalid secret references, and provide clear exception messages.\n- Expose a function (e.g., get_b2_credentials()) that returns the credentials as a tuple or dictionary.\n- Implement a function (e.g., authorize_b2_cli()) that uses the retrieved credentials to execute 'b2 authorize-account' via subprocess, ensuring the B2 CLI is authorized for subsequent operations.\n- Log authentication events (excluding sensitive data) for auditability.\n- Include documentation and usage examples for integration with other modules.\n\nConsider security best practices: never log or expose secrets, and ensure the 1Password CLI session is properly managed. Support both direct CLI invocation and Python SDK usage if feasible, but prioritize CLI compatibility for reliability.",
+        "testStrategy": "1. Mock or set up test 1Password items with dummy B2 credentials and configure environment variables or secret references accordingly.\n2. Run unit tests to verify that get_b2_credentials() correctly retrieves and parses credentials from 1Password, including handling of missing or malformed secrets.\n3. Test authorize_b2_cli() to ensure it invokes 'b2 authorize-account' with the correct arguments and that the B2 CLI is authorized (e.g., by running 'b2 get-account-info' and checking for success).\n4. Simulate error conditions (e.g., missing CLI, invalid credentials, locked 1Password vault) and confirm that the module raises appropriate exceptions and logs errors without leaking sensitive information.\n5. Integrate the module with a test script to verify end-to-end authentication and authorization flow.",
+        "status": "done",
+        "dependencies": [
+          1
+        ],
+        "priority": "high",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "version": "1.0",
+      "created": "2025-01-27T10:02:00Z",
+      "lastModified": "2025-01-27T10:02:00Z",
+      "description": "Tasks for master context",
+      "updated": "2025-07-27T08:03:48.325Z"
+    }
+  }
+}
