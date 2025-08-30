@@ -1,0 +1,19 @@
+# TODO
+
+- [ ] Task 1
+
+- [ ] Task 2
+
+- [ ] Task 3
+
+
+
+
+
+
+
+### ⛔ STOP HERE ⛔
+
+### DO NOT IMPLEMENT ANYTHING BELOW THIS LINE WITHOUT EXPLICIT USER REQUEST
+
+

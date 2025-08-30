@@ -1,0 +1,16 @@
+{
+  "run_metadata": {
+    "timestamp": "2025-07-27T16:04:09.393949",
+    "operation": "sync",
+    "total_files": 0,
+    "execution_time_seconds": 4.495940208435059,
+    "files_uploaded": 0,
+    "files_updated": 0,
+    "files_deleted": 0,
+    "files_skipped": 0,
+    "files_failed": 0,
+    "bucket_name": "fal-bucket"
+  },
+  "files_processed": [],
+  "errors": []
+}
