@@ -88,7 +88,7 @@ Examples:
     )
     
     # Init-config command
-    init_parser = subparsers.add_parser(
+    subparsers.add_parser(
         'init-config',
         help='Create default configuration file'
     )

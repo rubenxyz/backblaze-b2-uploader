@@ -1,6 +1,5 @@
 """Configuration management for B2 Sync tool."""
 
-import os
 import shutil
 import yaml
 from pathlib import Path
@@ -28,8 +27,7 @@ class Config:
         },
         "processing": {
             "supported_formats": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"],
-            "exclude_patterns": [".*\\.DS_Store", ".*Thumbs\\.db"],
-            "dry_run": False
+            "exclude_patterns": [r".*\.DS_Store", r".*Thumbs\.db"]
         }
     }
     
@@ -39,7 +37,6 @@ class Config:
     CONFIG_DIR = USER_FILES / "01.CONFIG"
     INPUT_DIR = USER_FILES / "04.INPUT"
     OUTPUT_DIR = USER_FILES / "05.OUTPUT"
-    TEMP_DIR = USER_FILES / "07.TEMP"
     
     # Config file path
     CONFIG_FILE = CONFIG_DIR / "b2_sync_config.yml"
@@ -111,7 +108,8 @@ class Config:
     @property
     def max_file_size(self) -> int:
         """Get max file size in bytes."""
-        return self.config_data["b2"]["max_file_size_gb"] * 1024 * 1024 * 1024
+        BYTES_PER_GB = 1024 * 1024 * 1024
+        return self.config_data["b2"]["max_file_size_gb"] * BYTES_PER_GB
     
     @property
     def exclude_patterns(self) -> list:

@@ -3,13 +3,16 @@
 import json
 import re
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 
 from .config import Config
+
+# Constants
+DEFAULT_TIMEOUT_SECONDS = 1800  # 30 minutes
+DEFAULT_B2_ENDPOINT = "f003"  # Default Backblaze endpoint
 
 
 def create_timestamped_output_dir(base_dir: Path) -> Path:
@@ -23,84 +26,61 @@ def create_timestamped_output_dir(base_dir: Path) -> Path:
 
 def parse_b2_sync_output(output: str) -> List[Dict[str, str]]:
     """Parse B2 sync command output to extract file information."""
+    # Define patterns and their handlers
+    SYNC_PATTERNS = {
+        'upload': (r'upload:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', True),  # (pattern, has_local_path)
+        'update': (r'update:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', True),
+        'delete': (r'delete:\s+b2://[^/]+/(.+)', False),
+        'skip': (r'skip:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', True),
+    }
+    
     files = []
     lines = output.strip().split('\n')
+    sync_time = datetime.now().isoformat()
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
-        # Parse different types of sync output lines
-        # Example: "upload: USER-FILES/04.INPUT/test.jpg -> b2://fal-bucket/test.jpg"
-        upload_match = re.match(r'upload:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', line)
-        if upload_match:
-            local_path = upload_match.group(1)
-            b2_key = upload_match.group(2)
-            files.append({
-                'local_path': local_path,
-                'b2_key': b2_key,
-                'action': 'upload',
-                'status': 'success',
-                'sync_time': datetime.now().isoformat()
-            })
-            continue
         
-        # Example: "update: USER-FILES/04.INPUT/test.jpg -> b2://fal-bucket/test.jpg"
-        update_match = re.match(r'update:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', line)
-        if update_match:
-            local_path = update_match.group(1)
-            b2_key = update_match.group(2)
-            files.append({
-                'local_path': local_path,
-                'b2_key': b2_key,
-                'action': 'update',
-                'status': 'success',
-                'sync_time': datetime.now().isoformat()
-            })
-            continue
-        
-        # Example: "delete: b2://fal-bucket/old_file.jpg"
-        delete_match = re.match(r'delete:\s+b2://[^/]+/(.+)', line)
-        if delete_match:
-            b2_key = delete_match.group(1)
-            files.append({
-                'local_path': '',
-                'b2_key': b2_key,
-                'action': 'delete',
-                'status': 'success',
-                'sync_time': datetime.now().isoformat()
-            })
-            continue
-        
-        # Example: "skip: USER-FILES/04.INPUT/test.jpg -> b2://fal-bucket/test.jpg (already exists)"
-        skip_match = re.match(r'skip:\s+(.+?)\s+->\s+b2://[^/]+/(.+)', line)
-        if skip_match:
-            local_path = skip_match.group(1)
-            b2_key = skip_match.group(2)
-            files.append({
-                'local_path': local_path,
-                'b2_key': b2_key,
-                'action': 'skip',
-                'status': 'success',
-                'sync_time': datetime.now().isoformat()
-            })
-            continue
+        # Try each pattern
+        for action, (pattern, has_local_path) in SYNC_PATTERNS.items():
+            match = re.match(pattern, line)
+            if match:
+                if has_local_path:
+                    local_path = match.group(1)
+                    b2_key = match.group(2)
+                else:
+                    local_path = ''
+                    b2_key = match.group(1)
+                
+                files.append({
+                    'local_path': local_path,
+                    'b2_key': b2_key,
+                    'action': action,
+                    'status': 'success',
+                    'sync_time': sync_time
+                })
+                break
     
     return files
 
 
-def get_actual_download_urls(bucket_name: str) -> List[str]:
-    """Get actual download URLs from B2 for all files in the bucket."""
-    urls = []
+def get_actual_download_urls(bucket_name: str) -> List[Tuple[str, str]]:
+    """Get actual download URLs from B2 for all files in the bucket.
+    
+    Returns:
+        List of tuples: (download_url, relative_path)
+    """
+    url_path_pairs = []
     try:
-        # Get list of files in bucket
-        list_command = [Config.B2_CLI, "ls", f"b2://{bucket_name}"]
+        # Get list of files in bucket (recursive to get all files in subdirectories)
+        list_command = [Config.B2_CLI, "ls", "--recursive", f"b2://{bucket_name}"]
         return_code, stdout, stderr = run_b2_command(list_command)
         
         if return_code != 0:
             logger.error(f"Failed to list bucket contents: {stderr}")
-            return urls
+            return url_path_pairs
         
         # For each file, construct the download URL
         # The URL format is: https://{endpoint}.backblazeb2.com/file/{bucket_name}/{filename}
@@ -110,13 +90,12 @@ def get_actual_download_urls(bucket_name: str) -> List[str]:
         account_command = [Config.B2_CLI, "account", "get"]
         account_return_code, account_stdout, account_stderr = run_b2_command(account_command)
         
-        endpoint = "f003"  # Default fallback
+        endpoint = DEFAULT_B2_ENDPOINT  # Default fallback
         if account_return_code == 0:
             try:
                 account_data = json.loads(account_stdout)
                 download_url = account_data.get('downloadUrl', '')
                 # Extract endpoint from URL: https://f003.backblazeb2.com
-                import re
                 endpoint_match = re.search(r'https://([^.]+)\.backblazeb2\.com', download_url)
                 if endpoint_match:
                     endpoint = endpoint_match.group(1)
@@ -126,62 +105,83 @@ def get_actual_download_urls(bucket_name: str) -> List[str]:
         # Now construct URLs for all files using the correct endpoint
         for line in stdout.strip().split('\n'):
             if line.strip():
-                filename = line.strip()
-                download_url = f"https://{endpoint}.backblazeb2.com/file/{bucket_name}/{filename}"
-                urls.append(download_url)
+                # The filename here is actually the full path in the bucket
+                file_path = line.strip()
+                # Skip directories (they end with /)
+                if file_path.endswith('/'):
+                    continue
+                download_url = f"https://{endpoint}.backblazeb2.com/file/{bucket_name}/{file_path}"
+                url_path_pairs.append((download_url, file_path))
                     
     except Exception as e:
         logger.error(f"Error getting download URLs: {e}")
     
-    return urls
+    return url_path_pairs
+
+
+def _ensure_subdirectory(output_dir: Path, file_path: Path) -> Path:
+    """Ensure subdirectory exists for the given file path."""
+    if file_path.parent != Path('.'):
+        subdirectory = output_dir / file_path.parent
+        subdirectory.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Created subdirectory: {subdirectory}")
+        return subdirectory
+    return output_dir
+
+
+def _get_link_file_path(output_dir: Path, file_path: Path, link_filename: str) -> Path:
+    """Get the full path for a link file, considering subdirectories."""
+    if file_path.parent != Path('.'):
+        return output_dir / file_path.parent / link_filename
+    return output_dir / link_filename
+
+
+def _create_link_file(output_dir: Path, file_path: Path, url: str) -> bool:
+    """Create a single link file with the given URL."""
+    try:
+        # Ensure subdirectory exists
+        _ensure_subdirectory(output_dir, file_path)
+        
+        # Create the text file name and path
+        base_name = file_path.stem
+        link_filename = f"{base_name}.txt"
+        link_file_path = _get_link_file_path(output_dir, file_path, link_filename)
+        
+        # Write the URL to the file
+        with open(link_file_path, 'w') as f:
+            f.write(url)
+        
+        logger.debug(f"Created link file: {link_file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create link file for {file_path}: {e}")
+        return False
 
 
 def generate_link_files(output_dir: Path, files_processed: List[Dict[str, str]], bucket_name: str) -> Path:
-    """Generate individual link files for each uploaded file with B2 friendly URLs."""
-    # Get actual download URLs from B2
-    urls = get_actual_download_urls(bucket_name)
+    """Generate individual link files for each uploaded file with B2 friendly URLs, preserving directory structure."""
+    # Get actual download URLs from B2 with relative paths
+    url_path_pairs = get_actual_download_urls(bucket_name)
     
     files_created = 0
     
-    if urls:
-        # Create individual text files for each URL
-        for url in urls:
-            # Extract filename from URL
-            filename_match = re.search(r'/([^/]+)$', url)
-            if filename_match:
-                original_filename = filename_match.group(1)
-                # Remove extension and add .txt
-                base_name = Path(original_filename).stem
-                link_filename = f"{base_name}.txt"
-                link_file_path = output_dir / link_filename
-                
-                # Write the friendly URL to the individual file
-                with open(link_file_path, 'w') as f:
-                    f.write(url)
-                
+    if url_path_pairs:
+        # Create individual text files for each URL, preserving directory structure
+        for url, relative_path in url_path_pairs:
+            file_path = Path(relative_path)
+            if _create_link_file(output_dir, file_path, url):
                 files_created += 1
-                logger.debug(f"Created link file: {link_file_path}")
     else:
         logger.warning("No URLs found, using fallback method")
         # Fallback to files_processed if available
         for file_info in files_processed:
             b2_key = file_info.get('b2_key', '')
             if b2_key and file_info.get('action') in ['upload', 'update']:
-                # Extract just the filename from the b2_key
-                filename = Path(b2_key).name
-                base_name = Path(filename).stem
-                link_filename = f"{base_name}.txt"
-                link_file_path = output_dir / link_filename
-                
+                file_path = Path(b2_key)
                 # Generate the friendly URL (using f003 as default)
                 public_url = f"https://f003.backblazeb2.com/file/{bucket_name}/{b2_key}"
-                
-                # Write the friendly URL to the individual file
-                with open(link_file_path, 'w') as f:
-                    f.write(public_url)
-                
-                files_created += 1
-                logger.debug(f"Created link file: {link_file_path}")
+                if _create_link_file(output_dir, file_path, public_url):
+                    files_created += 1
     
     logger.info(f"Generated {files_created} individual link files in: {output_dir}")
     return output_dir
@@ -276,7 +276,7 @@ def generate_failure_report(output_dir: Path, errors: List[Dict[str, str]], oper
 def run_b2_command(command: List[str], timeout: Optional[int] = None) -> Tuple[int, str, str]:
     """Run a B2 CLI command and return results."""
     if timeout is None:
-        timeout = 1800  # Default 30 minutes
+        timeout = DEFAULT_TIMEOUT_SECONDS
     
     try:
         result = subprocess.run(
@@ -294,28 +294,3 @@ def run_b2_command(command: List[str], timeout: Optional[int] = None) -> Tuple[i
         return -1, "", str(e)
 
 
-def validate_file_size(file_path: Path, max_size: int) -> bool:
-    """Validate that file size is within limits."""
-    try:
-        file_size = file_path.stat().st_size
-        if file_size > max_size:
-            logger.warning(f"File {file_path} exceeds size limit: {file_size} bytes")
-            return False
-        return True
-    except Exception as e:
-        logger.warning(f"Could not validate file size for {file_path}: {e}")
-        return False
-
-
-def get_supported_files(input_dir: Path, config: 'Config') -> List[Path]:
-    """Get list of supported image files from input directory."""
-    supported_files = []
-    
-    for file_path in input_dir.rglob('*'):
-        if file_path.is_file() and config.is_supported_format(file_path):
-            if validate_file_size(file_path, config.max_file_size):
-                supported_files.append(file_path)
-            else:
-                logger.warning(f"Skipping {file_path} due to size limit")
-    
-    return supported_files
